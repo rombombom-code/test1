@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Курс Валют в Україні</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: 'Roboto', sans-serif;
@@ -14,17 +15,19 @@
             padding: 0;
             min-height: 100vh;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            padding: 20px;
         }
         .container {
-            max-width: 800px;
+            max-width: 1200px;
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             padding: 30px;
             text-align: center;
             backdrop-filter: blur(10px);
+            margin-bottom: 20px;
         }
         h1 {
             color: #4a4a4a;
@@ -36,17 +39,23 @@
             flex-wrap: wrap;
             justify-content: center;
             gap: 20px;
+            margin-bottom: 30px;
         }
         .rate-card {
             background: #fff;
             border-radius: 10px;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
             padding: 20px;
-            width: 200px;
-            transition: transform 0.3s ease;
+            width: 180px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
         }
         .rate-card:hover {
             transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        .rate-card.selected {
+            border: 2px solid #667eea;
         }
         .currency {
             font-size: 24px;
@@ -57,12 +66,7 @@
         .rate {
             font-size: 18px;
             margin: 5px 0;
-        }
-        .buy {
             color: #28a745;
-        }
-        .sell {
-            color: #dc3545;
         }
         .last-update {
             margin-top: 20px;
@@ -73,9 +77,34 @@
             font-size: 18px;
             color: #666;
         }
+        #refresh {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+            transition: background 0.3s ease;
+        }
+        #refresh:hover {
+            background: #5a67d8;
+        }
+        .chart-container {
+            max-width: 800px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+            backdrop-filter: blur(10px);
+        }
         @media (max-width: 600px) {
             .rate-card {
                 width: 100%;
+            }
+            .container {
+                padding: 20px;
             }
         }
     </style>
@@ -83,20 +112,28 @@
 <body>
     <div class="container">
         <h1>Курс Валют в Україні</h1>
+        <button id="refresh">Оновити</button>
         <div id="rates" class="rates-container">
             <div class="loading">Завантаження...</div>
         </div>
         <div class="last-update" id="last-update"></div>
     </div>
+    <div class="chart-container">
+        <canvas id="ratesChart"></canvas>
+    </div>
 
     <script>
-        const apiUrl = 'https://api.privatbank.ua/p24api/pubinfo?exchange&json&coursid=11'; // Курс готівки
+        const apiUrl = 'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json';
+        const topCurrencies = ['USD', 'EUR', 'GBP', 'CHF', 'JPY', 'CAD', 'AUD', 'SEK', 'NOK', 'PLN'];
+        let chart;
 
         async function fetchRates() {
             try {
                 const response = await fetch(apiUrl);
                 const data = await response.json();
-                displayRates(data);
+                const filteredData = data.filter(currency => topCurrencies.includes(currency.cc));
+                displayRates(filteredData);
+                updateChart(filteredData);
             } catch (error) {
                 console.error('Помилка завантаження:', error);
                 document.getElementById('rates').innerHTML = '<div class="loading">Помилка завантаження даних</div>';
@@ -108,19 +145,58 @@
             ratesContainer.innerHTML = '';
 
             data.forEach(currency => {
-                if (currency.ccy !== 'BTC') { // Виключаємо біткоїн, якщо не потрібно
-                    const card = document.createElement('div');
-                    card.className = 'rate-card';
-                    card.innerHTML = `
-                        <div class="currency">${currency.ccy}</div>
-                        <div class="rate buy">Купівля: ${parseFloat(currency.buy).toFixed(2)} UAH</div>
-                        <div class="rate sell">Продаж: ${parseFloat(currency.sale).toFixed(2)} UAH</div>
-                    `;
-                    ratesContainer.appendChild(card);
-                }
+                const card = document.createElement('div');
+                card.className = 'rate-card';
+                card.innerHTML = `
+                    <div class="currency">${currency.cc}</div>
+                    <div class="rate">${parseFloat(currency.rate).toFixed(2)} UAH</div>
+                `;
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.rate-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                });
+                ratesContainer.appendChild(card);
             });
 
             document.getElementById('last-update').textContent = `Останнє оновлення: ${new Date().toLocaleString('uk-UA')}`;
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('ratesChart').getContext('2d');
+            const labels = data.map(c => c.cc);
+            const rates = data.map(c => parseFloat(c.rate));
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Курс до UAH',
+                        data: rates,
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Курс валют до гривні'
+                        }
+                    }
+                }
+            });
         }
 
         // Завантажуємо дані при завантаженні сторінки
@@ -128,6 +204,9 @@
 
         // Оновлюємо кожні 5 хвилин
         setInterval(fetchRates, 5 * 60 * 1000);
+
+        // Кнопка оновлення
+        document.getElementById('refresh').addEventListener('click', fetchRates);
     </script>
 </body>
 </html>
